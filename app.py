@@ -884,6 +884,40 @@ HTML_PAGE = """<!DOCTYPE html>
 </html>
 """
 
+def app(environ, start_response):
+    """WSGI entrypoint used by Vercel's Python runtime."""
+    method = environ.get("REQUEST_METHOD", "GET")
+    path = urllib.parse.urlparse(environ.get("PATH_INFO", "/")).path
+
+    try:
+        if method == "GET" and path in ("", "/", "/index.html"):
+            body = HTML_PAGE.encode("utf-8")
+            start_response("200 OK", [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(body)))])
+            return [body]
+
+        if method == "GET" and path == "/api/graph":
+            graph = get_graph()
+            nodes_res = graph.query("MATCH (n) RETURN n.id, n.name, labels(n)[0], properties(n)").result_set
+            edges_res = graph.query("MATCH (a)-[r]->(b) RETURN a.id, b.id, type(r)").result_set
+            color_map = {"User": "#38bdf8", "Group": "#a855f7", "Role": "#f59e0b", "Compute": "#06b6d4", "Secret": "#ec4899", "Storage": "#ff3366"}
+            nodes = [{"id": row[0], "label": f"{row[2]}\\n{row[1]}", "color": "#ff3366" if row[1] == "CustomerData-Postgres-Prod" else color_map.get(row[2], "#9ca3af"), "classification": row[3].get("classification", row[2])} for row in nodes_res]
+            edges = [{"from": row[0], "to": row[1], "label": row[2]} for row in edges_res]
+            payload = {"nodes": nodes, "edges": edges}
+        else:
+            status = "404 Not Found"
+            body = json.dumps({"error": "Not found"}).encode("utf-8")
+            start_response(status, [("Content-Type", "application/json"), ("Content-Length", str(len(body)))])
+            return [body]
+
+        body = json.dumps(payload).encode("utf-8")
+        start_response("200 OK", [("Content-Type", "application/json"), ("Content-Length", str(len(body)))])
+        return [body]
+    except Exception as error:
+        body = json.dumps({"error": str(error)}).encode("utf-8")
+        start_response("500 Internal Server Error", [("Content-Type", "application/json"), ("Content-Length", str(len(body)))])
+        return [body]
+
+
 class ReusableTCPServer(socketserver.TCPServer):
     allow_reuse_address = True
 
